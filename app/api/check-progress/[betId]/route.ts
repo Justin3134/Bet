@@ -311,7 +311,8 @@ async function evaluateNia(
 async function evaluateEmail(
   goal: string,
   userId: string,
-  sinceIso: string
+  sinceIso: string,
+  betCreatedAt: number
 ): Promise<{ score: number; findings: string; next_steps: string[]; commits_found: number }> {
   let emailContext = "";
 
@@ -550,7 +551,7 @@ export async function POST(
 
     try {
       if (taskType === "email") {
-        result = await evaluateEmail(bet.goal, insforgeUserId, sinceIso);
+        result = await evaluateEmail(bet.goal, insforgeUserId, sinceIso, betCreatedAt);
       } else if (taskType === "nia") {
         const repo = bet.github_repo ?? "";
         const ghToken: string | null = bet.users?.github_access_token ?? bet.github_access_token ?? null;

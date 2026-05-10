@@ -112,10 +112,10 @@ export default function LandingPage() {
       <section className="px-6 md:px-12 pt-20 pb-16 max-w-6xl mx-auto">
         <div className="max-w-4xl">
           <h1 className="text-display text-[var(--text-primary)] mb-6 animate-fade-in">
-            Put your money where your mouth is.
+            Make the cost of missing real.
           </h1>
           <p className="text-lg md:text-xl text-[var(--text-secondary)] font-sans max-w-2xl leading-relaxed mb-10 animate-fade-in stagger-1">
-            Founders publicly stake money on their goals. An AI agent watches your GitHub and decides if you won. No self-reporting. No honor system.
+            Stake real money on your next launch. An AI reads your GitHub commits — not your promises — and rules hit or miss. Miss your deadline, lose your stake. Publicly. Permanently.
           </p>
           <div className="flex flex-wrap items-center gap-4 mb-12 animate-fade-in stagger-2">
             <Link href="/bet/new"><Button size="lg" className="gap-2">Make a Bet<ArrowRight size={16} /></Button></Link>
@@ -151,8 +151,8 @@ export default function LandingPage() {
       </section>
 
       <section className="px-6 md:px-12 py-24 max-w-6xl mx-auto border-t border-[var(--border)] text-center">
-        <h2 className="text-hero text-[var(--text-primary)] mb-4 max-w-xl mx-auto">Ready to put something on the line?</h2>
-        <p className="text-[var(--text-secondary)] font-sans mb-8 max-w-md mx-auto">The agent doesn&apos;t care about excuses.</p>
+        <h2 className="text-hero text-[var(--text-primary)] mb-4 max-w-xl mx-auto">What happens if you miss this one too?</h2>
+        <p className="text-[var(--text-secondary)] font-sans mb-8 max-w-md mx-auto">Put money on it before you start. The agent doesn&apos;t negotiate.</p>
         <Link href="/sign-in"><Button size="lg" className="gap-2">Make your first bet<ArrowRight size={16} /></Button></Link>
       </section>
 

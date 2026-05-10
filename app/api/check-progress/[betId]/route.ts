@@ -348,8 +348,8 @@ async function evaluateEmail(
     };
   }
 
-  // Build a concise search query — Hyperspell's LLM rewrites it for better retrieval
-  const searchQuery = `Email sent after ${sinceIso} related to: ${goal}`;
+  // Build a concise search query focused on content, not date — the date filter is in options
+  const searchQuery = `Email related to: ${goal}`;
 
   // Primary search: Gmail only, filtered to emails after bet started
   let res: Awaited<ReturnType<typeof hs.memories.search>>;
@@ -371,7 +371,7 @@ async function evaluateEmail(
 
   console.log("[check-progress] gmail search returned", (res.documents ?? []).length, "docs");
 
-  // Fallback: search all sources with the same date filter if Gmail-only returned nothing
+  // Fallback 1: search all sources with same date filter
   let docs = res.documents ?? [];
   if (docs.length === 0) {
     try {
@@ -390,8 +390,24 @@ async function evaluateEmail(
     }
   }
 
-  // Last-resort fallback: no date filter, in case sinceIso is too narrow or the email
-  // has a slightly different timestamp in Hyperspell's index
+  // Fallback 2: widen to 3 days back so a recently indexed email isn't missed
+  if (docs.length === 0) {
+    try {
+      const threeDaysAgo = new Date(betCreatedAt - 3 * 24 * 60 * 60 * 1000).toISOString();
+      const wideRes = await hs.memories.search({
+        query: searchQuery,
+        answer: false,
+        sources: ["google_mail", "gmail_actions"],
+        options: { after: threeDaysAgo, max_results: 10 },
+      });
+      docs = wideRes.documents ?? [];
+      console.log("[check-progress] 3-day fallback search returned", docs.length, "docs");
+    } catch {
+      // Ignore
+    }
+  }
+
+  // Fallback 3: no date filter at all — let the LLM decide if the email is relevant
   if (docs.length === 0) {
     try {
       const noDateRes = await hs.memories.search({
@@ -462,7 +478,7 @@ async function evaluateEmail(
       { role: "system", content: EVALUATOR_SYSTEM_PROMPT },
       {
         role: "user",
-        content: `Goal: ${goal}\n\nBet created: ${new Date(betCreatedAt).toISOString()} (a 15-minute grace window before this time is allowed)\n\nEmails found (sent or received) related to the goal:\n${emailContext}\n\nCount emails sent within 15 minutes before OR after the bet was created as valid evidence. Evaluate the progress score (0-100), provide findings, and list 3 specific next steps.`,
+        content: `Goal: ${goal}\n\nBet created: ${new Date(betCreatedAt).toISOString()}\n\nGrace window: emails sent up to 60 minutes BEFORE the bet was created are valid evidence (it's common to send the email first and then create the bet).\n\nEmails found related to the goal:\n${emailContext}\n\nIf any email clearly matches the goal criteria and was sent within 60 minutes before OR any time after the bet was created, count it as valid evidence and give a high score. Only reject an email if it was sent more than 60 minutes before the bet OR clearly does not match the goal. Evaluate the progress score (0-100), provide findings, and list 3 specific next steps.`,
       },
     ],
   });
@@ -523,11 +539,11 @@ export async function POST(
 
     const taskType: string = bet.task_type ?? "github";
 
-    // For email bets, give a 15-minute grace window before the bet creation time.
-    // This handles the common case where the user sends an email and creates the bet
-    // within seconds of each other — the email timestamp can precede the DB record.
+    // For email bets, give a 60-minute grace window before the bet creation time.
+    // Users commonly send an email and then immediately create the bet — the email
+    // timestamp can be anywhere from seconds to an hour before the DB record.
     const betCreatedAt = new Date(bet.created_at).getTime();
-    const gracePeriodMs = taskType === "email" ? 15 * 60 * 1000 : 0;
+    const gracePeriodMs = taskType === "email" ? 60 * 60 * 1000 : 0;
     const sinceIso = new Date(betCreatedAt - gracePeriodMs).toISOString();
     const insforgeUserId: string = bet.users?.insforge_user_id ?? authData.user.id;
 

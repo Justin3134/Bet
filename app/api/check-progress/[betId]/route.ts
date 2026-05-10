@@ -89,6 +89,23 @@ const INSFORGE_URL = process.env.NEXT_PUBLIC_INSFORGE_URL!;
 const INSFORGE_ANON_KEY = process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY!;
 const insforgeServer = createClient({ baseUrl: INSFORGE_URL, anonKey: INSFORGE_ANON_KEY });
 
+// Email-specific evaluator: lenient on dates, generates follow-up steps instead of "draft the email"
+const EMAIL_EVALUATOR_SYSTEM_PROMPT = `You are evaluating whether a developer has completed an email-based goal on a platform called BET.
+
+Rules:
+- If ANY email is found whose subject or body is reasonably related to the goal (same company name, person, or topic), score it 80-100 and consider it a HIT.
+- Be lenient about dates: if the email was sent the same day as the bet or within a few days before it, count it as valid evidence.
+- Score 100 when the goal is clearly met (e.g. an email to the named recipient about the named product was found).
+- Score 0 ONLY when absolutely no matching email exists.
+- next_steps must be FOLLOW-UP actions to take AFTER sending the email — e.g. "Follow up if no reply in 3 days", "Prepare a demo deck in case they respond". NEVER suggest drafting or sending the email that was already sent.
+
+Always respond with valid JSON in this exact format:
+{
+  "score": <integer 0-100>,
+  "findings": "<1-2 sentence assessment of what was found>",
+  "next_steps": ["<follow-up action 1>", "<follow-up action 2>", "<follow-up action 3>"]
+}`;
+
 // Coach prompt: returns score + findings + next_steps
 const EVALUATOR_SYSTEM_PROMPT = `You are an objective technical evaluator AND coach for a developer accountability platform called BET.
 
@@ -313,7 +330,7 @@ async function evaluateEmail(
   userId: string,
   sinceIso: string,
   betCreatedAt: number
-): Promise<{ score: number; findings: string; next_steps: string[]; commits_found: number }> {
+): Promise<{ score: number; findings: string; next_steps: string[]; commits_found: number; nia_summary: string }> {
   let emailContext = "";
 
   const hs = new Hyperspell({
@@ -345,6 +362,7 @@ async function evaluateEmail(
       findings: "Gmail is not connected to Hyperspell. Go to your profile and reconnect Gmail so the agent can read your emails.",
       next_steps: [],
       commits_found: 0,
+      nia_summary: "",
     };
   }
 
@@ -456,6 +474,7 @@ async function evaluateEmail(
         findings: `Gmail is still being indexed. ${indexedMsg} Try again in a few minutes once the sync completes.`,
         next_steps: [],
         commits_found: 0,
+        nia_summary: "",
       };
     }
     // Hyperspell polls Gmail periodically — a freshly sent email may not be indexed yet
@@ -468,17 +487,28 @@ async function evaluateEmail(
       findings: `No emails related to the goal were found after the bet started (${gmailIndexed.toLocaleString()} emails indexed).${recentNote}`,
       next_steps: [],
       commits_found: 0,
+      nia_summary: "",
     };
   }
+
+  // Build a display-friendly list of email subjects found (stored as nia_summary for email bets)
+  const gmailSummary = docs.length > 0
+    ? "Emails found in Gmail:\n" + docs.slice(0, 8).map((d) => {
+        const doc = d as Record<string, unknown>;
+        const subject = String(doc.title ?? doc.subject ?? "No subject");
+        const date = String(doc.date ?? (doc.metadata as Record<string, unknown>)?.created_at ?? "");
+        return `• ${subject}${date ? `  (${date})` : ""}`;
+      }).join("\n")
+    : "";
 
   const completion = await insforgeServer.ai.chat.completions.create({
     model: "openai/gpt-4o",
     maxTokens: 600,
     messages: [
-      { role: "system", content: EVALUATOR_SYSTEM_PROMPT },
+      { role: "system", content: EMAIL_EVALUATOR_SYSTEM_PROMPT },
       {
         role: "user",
-        content: `Goal: ${goal}\n\nBet created: ${new Date(betCreatedAt).toISOString()}\n\nGrace window: emails sent up to 60 minutes BEFORE the bet was created are valid evidence (it's common to send the email first and then create the bet).\n\nEmails found related to the goal:\n${emailContext}\n\nIf any email clearly matches the goal criteria and was sent within 60 minutes before OR any time after the bet was created, count it as valid evidence and give a high score. Only reject an email if it was sent more than 60 minutes before the bet OR clearly does not match the goal. Evaluate the progress score (0-100), provide findings, and list 3 specific next steps.`,
+        content: `Goal: ${goal}\n\nBet created: ${new Date(betCreatedAt).toISOString()}\n\nEmails found related to the goal:\n${emailContext}\n\nIf any email subject or body is related to the goal (same company name, person, or topic), even if sent the same day or a few days before the bet, score it 80-100 and list follow-up next steps. Only score 0 if nothing matches at all.`,
       },
     ],
   });
@@ -494,6 +524,7 @@ async function evaluateEmail(
     findings: String(result.findings),
     next_steps: Array.isArray(result.next_steps) ? result.next_steps.map(String) : [],
     commits_found: 0,
+    nia_summary: gmailSummary,
   };
 }
 

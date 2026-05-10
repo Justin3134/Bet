@@ -3,7 +3,7 @@
 import { Evidence, Bet, TensorlakeResult } from "@/lib/insforge";
 import { formatRelativeTime } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronUp, GitCommit, CheckCircle, XCircle, FileCode, Cpu, ListChecks } from "lucide-react";
+import { ChevronDown, ChevronUp, GitCommit, CheckCircle, XCircle, FileCode, Cpu, ListChecks, Mail } from "lucide-react";
 import { useState } from "react";
 
 interface EvidenceLogProps {
@@ -41,6 +41,35 @@ function NextStepsBlock({ steps }: { steps: string[] }) {
               {i + 1}.
             </span>
             <p className="text-mono-xs text-[var(--text-primary)] leading-relaxed">{step}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GmailMatchesBlock({ summary }: { summary: string }) {
+  const lines = summary.split("\n").filter((l) => l.trim());
+  const header = lines[0]; // "Emails found in Gmail:"
+  const emails = lines.slice(1);
+  return (
+    <div className="mb-4">
+      <div className="flex items-center gap-2 mb-2">
+        <Mail size={11} className="text-[var(--green)]" />
+        <span className="text-mono-xs text-[var(--text-tertiary)] uppercase tracking-wider">
+          {header}
+        </span>
+        <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-semibold border border-[var(--green)] text-[var(--green)] rounded-sm opacity-70">
+          HYPERSPELL
+        </span>
+      </div>
+      <div className="pl-3 border-l-2 border-[var(--green)] border-opacity-40 flex flex-col gap-1.5">
+        {emails.map((email, i) => (
+          <div key={i} className="flex items-start gap-2">
+            <CheckCircle size={10} className="text-[var(--green)] mt-0.5 flex-shrink-0 opacity-70" />
+            <p className="text-mono-xs text-[var(--text-secondary)] leading-relaxed">
+              {email.replace(/^•\s*/, "")}
+            </p>
           </div>
         ))}
       </div>
@@ -228,6 +257,8 @@ export function EvidenceLog({ evidence, betStatus, lastCheckedAt }: EvidenceLogP
         const hasNia = !!entry.nia_summary;
         const hasTensorlake = !!entry.tensorlake_result;
         const isEmailBet = !entry.commit_messages || entry.commit_messages.length === 0;
+        const hasGmailSummary = !!entry.nia_summary && entry.nia_summary.startsWith("Emails found in Gmail:");
+        const hasNiaSummary = !!entry.nia_summary && !entry.nia_summary.startsWith("Emails found in Gmail:");
 
         return (
           <div key={entry.id} className="flex gap-5 pb-8 animate-fade-in">
@@ -276,7 +307,7 @@ export function EvidenceLog({ evidence, betStatus, lastCheckedAt }: EvidenceLogP
                   {/* Sponsor attribution pills */}
                   <div className="flex items-center gap-1 ml-1">
                     <SponsorPill label="InsForge" active />
-                    <SponsorPill label="NIA" active={hasNia} />
+                    <SponsorPill label="NIA" active={hasNiaSummary} />
                     <SponsorPill label="TensorLake" active={hasTensorlake} />
                     <SponsorPill label="Hyperspell" active={isEmailBet && entry.commits_found === 0} />
                   </div>
@@ -298,9 +329,14 @@ export function EvidenceLog({ evidence, betStatus, lastCheckedAt }: EvidenceLogP
                     <NextStepsBlock steps={entry.next_steps} />
                   )}
 
-                  {/* NIA Codebase Analysis */}
-                  {entry.nia_summary && (
-                    <NiaSummaryBlock summary={entry.nia_summary} />
+                  {/* Gmail Matches (for email bets) */}
+                  {hasGmailSummary && (
+                    <GmailMatchesBlock summary={entry.nia_summary!} />
+                  )}
+
+                  {/* NIA Codebase Analysis (for github/nia bets) */}
+                  {hasNiaSummary && (
+                    <NiaSummaryBlock summary={entry.nia_summary!} />
                   )}
 
                   {/* TensorLake Code Execution */}

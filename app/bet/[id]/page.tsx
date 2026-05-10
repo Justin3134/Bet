@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRequireAuth } from "@/lib/auth-context";
 import { insforge, Bet, Evidence, InsforgeUser } from "@/lib/insforge";
 import { Badge } from "@/components/ui/Badge";
 import { ProgressBar } from "@/components/ui/ProgressBar";
@@ -21,6 +22,8 @@ import type { NiaTask } from "@/lib/insforge";
 export default function BetPage() {
   const params = useParams();
   const betId = params.id as string;
+
+  useRequireAuth();
 
   const [bet, setBet] = useState<Bet | null | undefined>(undefined);
   const [evidence, setEvidence] = useState<Evidence[]>([]);
@@ -78,8 +81,12 @@ export default function BetPage() {
     setChecking(true);
     setCheckError(null);
     try {
-      const { data: sessionData } = await insforge.auth.refreshSession();
-      const token = sessionData?.accessToken ?? "";
+      const { data: sessionData, error: sessionError } = await insforge.auth.refreshSession();
+      if (sessionError || !sessionData?.accessToken) {
+        setCheckError("Session expired. Please sign out and sign back in.");
+        return;
+      }
+      const token = sessionData.accessToken;
       const res = await fetch(`/api/check-progress/${betId}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -114,8 +121,12 @@ export default function BetPage() {
     setDeepAnalyzing(true);
     setDeepAnalysisStatus(null);
     try {
-      const { data: sessionData } = await insforge.auth.refreshSession();
-      const token = sessionData?.accessToken ?? "";
+      const { data: sessionData, error: sessionError } = await insforge.auth.refreshSession();
+      if (sessionError || !sessionData?.accessToken) {
+        setDeepAnalysisStatus("error:Session expired. Please sign out and sign back in.");
+        return;
+      }
+      const token = sessionData.accessToken;
       const res = await fetch(`/api/deep-analysis/${betId}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -151,8 +162,9 @@ export default function BetPage() {
     if (!bet || niaRefreshing) return;
     setNiaRefreshing(true);
     try {
-      const { data: sessionData } = await insforge.auth.refreshSession();
-      const token = sessionData?.accessToken ?? "";
+      const { data: sessionData, error: sessionError } = await insforge.auth.refreshSession();
+      if (sessionError || !sessionData?.accessToken) return;
+      const token = sessionData.accessToken;
       const res = await fetch(`/api/nia-refresh/${betId}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },

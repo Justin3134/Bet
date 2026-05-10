@@ -320,24 +320,49 @@ async function evaluateEmail(
     userID: userId,
   });
 
+  // Check indexing status
   let gmailIndexed = 0;
   let gmailPending = 0;
+  let gmailConnected = true;
   try {
     const statusRes = await hs.memories.status();
     const gmailCounts = statusRes.providers?.google_mail ?? {};
-    gmailIndexed = (gmailCounts.completed ?? 0);
+    gmailIndexed = gmailCounts.completed ?? 0;
     gmailPending = (gmailCounts.pending ?? 0) + (gmailCounts.processing ?? 0);
-  } catch {
-    // Status check is optional
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // A 401/403 means Gmail is not connected or the token expired
+    if (msg.includes("401") || msg.includes("403") || msg.includes("unauthorized") || msg.includes("forbidden")) {
+      gmailConnected = false;
+    }
+    console.warn("[check-progress] Hyperspell status check failed:", msg);
   }
 
+  if (!gmailConnected) {
+    return {
+      score: 0,
+      findings: "Gmail is not connected to Hyperspell. Go to your profile and reconnect Gmail so the agent can read your emails.",
+      next_steps: [],
+      commits_found: 0,
+    };
+  }
+
+  // Build a concise search query — Hyperspell's LLM rewrites it for better retrieval
+  const searchQuery = `Email sent after ${sinceIso} related to: ${goal}`;
+
+  // Primary search: Gmail only, filtered to emails after bet started
   let res: Awaited<ReturnType<typeof hs.memories.search>>;
   try {
     res = await hs.memories.search({
-      query: goal,
+      query: searchQuery,
       answer: false,
-      sources: ["google_mail"],
-      options: { max_results: 10 },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      effort: "low" as any,
+      sources: ["google_mail", "gmail_actions"],
+      options: {
+        after: sinceIso,
+        max_results: 10,
+      },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -346,18 +371,20 @@ async function evaluateEmail(
   }
 
   console.log("[check-progress] gmail search returned", (res.documents ?? []).length, "docs");
-  if (res.errors && res.errors.length > 0) {
-    console.warn("[check-progress] Hyperspell query warnings:", res.errors.map((e) => Object.values(e).join(": ")).join("; "));
-  }
 
-  // If the source-filtered search returned nothing, fall back to a broad search
+  // Fallback: search all sources with the same date filter if Gmail-only returned nothing
   let docs = res.documents ?? [];
   if (docs.length === 0) {
     try {
       const broadRes = await hs.memories.search({
-        query: goal,
+        query: searchQuery,
         answer: false,
-        options: { max_results: 10 },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        effort: "low" as any,
+        options: {
+          after: sinceIso,
+          max_results: 10,
+        },
       });
       docs = broadRes.documents ?? [];
       console.log("[check-progress] broad fallback search returned", docs.length, "docs");
@@ -366,7 +393,27 @@ async function evaluateEmail(
     }
   }
 
-  console.log("[check-progress] total docs after fallback:", docs.length, JSON.stringify(docs.slice(0, 2), null, 2));
+  // Last-resort fallback: no date filter, in case sinceIso is too narrow or the email
+  // has a slightly different timestamp in Hyperspell's index
+  if (docs.length === 0) {
+    try {
+      const noDateRes = await hs.memories.search({
+        query: goal,
+        answer: false,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        effort: "low" as any,
+        sources: ["google_mail", "gmail_actions"],
+        options: { max_results: 10 },
+      });
+      docs = noDateRes.documents ?? [];
+      console.log("[check-progress] no-date fallback search returned", docs.length, "docs");
+    } catch {
+      // Ignore
+    }
+  }
+
+  console.log("[check-progress] total docs after all fallbacks:", docs.length);
+
   emailContext = docs
     .slice(0, 8)
     .map((d) => {
@@ -400,9 +447,14 @@ async function evaluateEmail(
         commits_found: 0,
       };
     }
+    // Hyperspell polls Gmail periodically — a freshly sent email may not be indexed yet
+    const betAgeSeconds = (Date.now() - new Date(sinceIso).getTime()) / 1000;
+    const recentNote = betAgeSeconds < 900
+      ? " If you just sent an email, Hyperspell may not have indexed it yet — wait 5–10 minutes and try again."
+      : "";
     return {
       score: 0,
-      findings: "No relevant emails found since the bet was created.",
+      findings: `No emails related to the goal were found after the bet started (${gmailIndexed.toLocaleString()} emails indexed).${recentNote}`,
       next_steps: [],
       commits_found: 0,
     };
@@ -415,7 +467,7 @@ async function evaluateEmail(
       { role: "system", content: EVALUATOR_SYSTEM_PROMPT },
       {
         role: "user",
-        content: `Goal: ${goal}\n\nBet started: ${sinceIso}\n\nEmails found (sent or received) related to the goal:\n${emailContext}\n\nOnly count emails sent after the bet started as evidence. Evaluate the progress score (0-100), provide findings, and list 3 specific next steps.`,
+        content: `Goal: ${goal}\n\nBet created: ${new Date(betCreatedAt).toISOString()} (a 15-minute grace window before this time is allowed)\n\nEmails found (sent or received) related to the goal:\n${emailContext}\n\nCount emails sent within 15 minutes before OR after the bet was created as valid evidence. Evaluate the progress score (0-100), provide findings, and list 3 specific next steps.`,
       },
     ],
   });
@@ -474,8 +526,14 @@ export async function POST(
       return NextResponse.json({ error: "Bet is not active" }, { status: 400 });
     }
 
-    const sinceIso = new Date(bet.created_at).toISOString();
     const taskType: string = bet.task_type ?? "github";
+
+    // For email bets, give a 15-minute grace window before the bet creation time.
+    // This handles the common case where the user sends an email and creates the bet
+    // within seconds of each other — the email timestamp can precede the DB record.
+    const betCreatedAt = new Date(bet.created_at).getTime();
+    const gracePeriodMs = taskType === "email" ? 15 * 60 * 1000 : 0;
+    const sinceIso = new Date(betCreatedAt - gracePeriodMs).toISOString();
     const insforgeUserId: string = bet.users?.insforge_user_id ?? authData.user.id;
 
     // Fetch the most recent TensorLake result for this bet (if any) to inject into evaluation

@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { createClient } from "@insforge/sdk";
 import { getAdminClient } from "@/lib/insforge-admin";
 
-const TENSORLAKE_API_KEY = process.env.TENSORLAKE_API_KEY ?? "";
 // TensorLake application invocation endpoint
 const TL_INVOKE_URL = "https://api.tensorlake.ai/applications/deep_analyze_repo";
 
@@ -51,7 +50,8 @@ export async function POST(
       );
     }
 
-    if (!TENSORLAKE_API_KEY) {
+    const tensorlakeApiKey = process.env.TENSORLAKE_API_KEY ?? "";
+    if (!tensorlakeApiKey) {
       return NextResponse.json(
         { error: "TensorLake not configured" },
         { status: 503 }
@@ -59,27 +59,30 @@ export async function POST(
     }
 
     // TensorLake pydantic model input: plain JSON body
+    const tlPayload = { bet_id: betId, repo: bet.github_repo, goal: bet.goal };
+    console.log("[deep-analysis] POST", TL_INVOKE_URL, JSON.stringify(tlPayload));
     const tlRes = await fetch(TL_INVOKE_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${TENSORLAKE_API_KEY}`,
+        Authorization: `Bearer ${tensorlakeApiKey}`,
         "Content-Type": "application/json",
         Accept: "application/json",
       },
-      body: JSON.stringify({ bet_id: betId, repo: bet.github_repo, goal: bet.goal }),
+      body: JSON.stringify(tlPayload),
+      cache: "no-store",
       signal: AbortSignal.timeout(15000),
     });
 
+    const errText = await tlRes.text().catch(() => "");
+    console.log("[deep-analysis] TensorLake response:", tlRes.status, errText);
     if (!tlRes.ok) {
-      const errText = await tlRes.text().catch(() => "");
-      console.error("[deep-analysis] TensorLake error:", tlRes.status, errText);
       return NextResponse.json(
-        { error: `TensorLake invocation failed: ${tlRes.status}` },
+        { error: `TensorLake invocation failed: ${tlRes.status} — ${errText}` },
         { status: 502 }
       );
     }
 
-    const tlData = await tlRes.json() as Record<string, unknown>;
+    const tlData = JSON.parse(errText) as Record<string, unknown>;
     const invocationId = (tlData.request_id ?? tlData.invocation_id ?? tlData.id ?? null) as string | null;
 
     return NextResponse.json({

@@ -1,0 +1,1 @@
+ALTER TABLE bets ADD COLUMN task_type TEXT NOT NULL DEFAULT 'github';

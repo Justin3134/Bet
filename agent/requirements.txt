@@ -1,0 +1,6 @@
+tensorlake
+openai
+nia-ai-py
+hyperspell
+requests
+python-dotenv

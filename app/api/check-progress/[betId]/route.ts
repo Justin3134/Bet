@@ -356,8 +356,6 @@ async function evaluateEmail(
     res = await hs.memories.search({
       query: searchQuery,
       answer: false,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      effort: "low" as any,
       sources: ["google_mail", "gmail_actions"],
       options: {
         after: sinceIso,
@@ -379,8 +377,6 @@ async function evaluateEmail(
       const broadRes = await hs.memories.search({
         query: searchQuery,
         answer: false,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        effort: "low" as any,
         options: {
           after: sinceIso,
           max_results: 10,
@@ -400,8 +396,6 @@ async function evaluateEmail(
       const noDateRes = await hs.memories.search({
         query: goal,
         answer: false,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        effort: "low" as any,
         sources: ["google_mail", "gmail_actions"],
         options: { max_results: 10 },
       });
